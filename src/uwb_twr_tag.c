@@ -28,6 +28,9 @@
 
 #include <string.h>
 #include <stdio.h>
+#include <limits.h>
+#include <math.h>
+#include <float.h>
 
 #include "cfg.h"
 #include "led.h"
@@ -82,6 +85,26 @@ static const double tsfreq = 499.2e6 * 128;  // Timestamp counter frequency
 
 #define ANTENNA_OFFSET 154.6   // In meter
 #define ANTENNA_DELAY  (ANTENNA_OFFSET*499.2e6*128)/299792458.0 // In radio tick
+
+typedef struct {
+  unsigned int interrogations;
+  unsigned int successful_interrogations;
+  double min_distance;
+  double max_distance;
+  double avg_distance;
+  double avg_rssi;
+} stats;
+
+const stats C_INIT_STATS = {
+  .interrogations = 0,
+  .successful_interrogations = 0,
+  .min_distance = DBL_MAX,
+  .max_distance = DBL_MIN,
+  .avg_distance = 0.0,
+  .avg_rssi = 0
+};
+
+stats g_stats = C_INIT_STATS;
 
 static packet_t rxPacket;
 static packet_t txPacket;
@@ -175,48 +198,48 @@ static void rxcallback(dwDevice_t *dev) {
       memcpy(&answer_tx, &report->answerTx, 5);
       memcpy(&final_rx, &report->finalRx, 5);
 
-      printf("%02x%08x ", (unsigned int)poll_tx.high8, (unsigned int)poll_tx.low32);
-      printf("%02x%08x\r\n", (unsigned int)poll_rx.high8, (unsigned int)poll_rx.low32);
-      printf("%02x%08x ", (unsigned int)answer_tx.high8, (unsigned int)answer_tx.low32);
-      printf("%02x%08x\r\n", (unsigned int)answer_rx.high8, (unsigned int)answer_rx.low32);
-      printf("%02x%08x ", (unsigned int)final_tx.high8, (unsigned int)final_tx.low32);
-      printf("%02x%08x\r\n", (unsigned int)final_rx.high8, (unsigned int)final_rx.low32);
-
       tround1 = answer_rx.low32 - poll_tx.low32;
       treply1 = answer_tx.low32 - poll_rx.low32;
       tround2 = final_rx.low32 - answer_tx.low32;
       treply2 = final_tx.low32 - answer_rx.low32;
 
-      printf("%08x %08x\r\n", (unsigned int)tround1, (unsigned int)treply2);
-      printf("\\    /   /     \\\r\n");
-      printf("%08x %08x\r\n", (unsigned int)treply1, (unsigned int)tround2);
-
       tprop_ctn = ((tround1*tround2) - (treply1*treply2)) / (tround1 + tround2 + treply1 + treply2);
-
-      printf("TProp (ctn): %d\r\n", (unsigned int)tprop_ctn);
 
       tprop = tprop_ctn/tsfreq;
       distance = C * tprop;
 
-      printf("distance %d: %5dmm\r\n", rxPacket.sourceAddress[0], (unsigned int)(distance*1000));
+      g_stats.max_distance = fmax(g_stats.max_distance, distance);
+      g_stats.min_distance = fmin(g_stats.min_distance, distance);
+      if (!g_stats.successful_interrogations) {
+        g_stats.avg_distance = distance;
+        g_stats.avg_rssi = dwGetReceivePower(dev);
+      }
+      else {
+        g_stats.avg_distance += distance / g_stats.successful_interrogations;
+        g_stats.avg_rssi += dwGetReceivePower(dev) / g_stats.successful_interrogations;
+      }
 
       dwGetReceiveTimestamp(dev, &arival);
       arival.full -= (ANTENNA_DELAY/2);
-      printf("Total in-air time (ctn): 0x%08x\r\n", (unsigned int)(arival.low32-poll_tx.low32));
 
+      g_stats.successful_interrogations++;
       break;
     }
   }
 }
 
+void printStats()
+{
+  printf("max = %9.3f min = %9.3f avg = %9.3f plr = %4.1f rssi = %4.1f", 
+          g_stats.max_distance, g_stats.min_distance, g_stats.avg_distance, g_stats.avg_rssi,
+          (g_stats.interrogations - g_stats.successful_interrogations) / g_stats.interrogations * 100.0f);
+  g_stats = C_INIT_STATS;
+}
+
 void initiateRanging(dwDevice_t *dev)
 {
-  printf ("Interrogating anchor %d\r\n",  config.anchors[curr_anchor]);
-  base_address[0] =  config.anchors[curr_anchor];
-  curr_anchor ++;
-  if (curr_anchor > config.anchorListSize) {
-    curr_anchor = 0;
-  }
+  base_address[0] = 1;
+
   dwIdle(dev);
 
   txPacket.payload[TYPE] = POLL;
@@ -231,6 +254,7 @@ void initiateRanging(dwDevice_t *dev)
 
   dwWaitForResponse(dev, true);
   dwStartTransmit(dev);
+  g_stats.interrogations++;
 }
 
 static uint32_t twrTagOnEvent(dwDevice_t *dev, uwbEvent_t event)

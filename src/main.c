@@ -279,6 +279,17 @@ static void handleMenuMain(char ch, MenuState* menuState) {
          menuState->currentMenu = powerMenu;
          menuState->configChanged = false;
          break;
+    case 'x': {
+      uint8_t mode = 0;
+      if (cfgReadU8(cfgMode, &mode)) {
+        if (mode == MODE_TAG) {
+          printStats();
+        }
+      } 
+
+    }
+        
+        
     case 'u':
       bootload();
     default:
@@ -601,6 +612,7 @@ static void help() {
   printf("d   - reset configuration\r\n");
   printf("u   - enter BSL (DFU mode)\r\n");
   printf("h   - This help\r\n");
+  printf("x   - print stats (TWR tag mode only, Flytrex testing)");
   printf("---- For machine only\r\n");
   printf("b   - Switch to binary mode (sniffer only)\r\n");
 }
