@@ -81,5 +81,6 @@ char * uwbStrError();
 struct uwbConfig_s * uwbGetConfig();
 int uwbAlgorithmCount();
 char * uwbAlgorithmName(unsigned int id);
+void printStats(void);
 
 #endif //__UWB_H__

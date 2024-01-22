@@ -95,7 +95,7 @@ static void main_task(void *pvParameters) {
   ledOn(ledMode);
   buttonInit(buttonIdle);
 
-  printf("\r\n\r\n====================\r\n");
+  printf("\r\n\r\n====== FLYTREX CUSTOM ====\r\n");
 
   printf("SYSTEM\t: CPU-ID: ");
   for (i=0; i<12; i++) {
@@ -280,16 +280,10 @@ static void handleMenuMain(char ch, MenuState* menuState) {
          menuState->configChanged = false;
          break;
     case 'x': {
-      uint8_t mode = 0;
-      if (cfgReadU8(cfgMode, &mode)) {
-        if (mode == MODE_TAG) {
-          printStats();
-        }
-      } 
-
+      printStats();
+      menuState->configChanged = false;
+      break; 
     }
-        
-        
     case 'u':
       bootload();
     default:
@@ -612,7 +606,7 @@ static void help() {
   printf("d   - reset configuration\r\n");
   printf("u   - enter BSL (DFU mode)\r\n");
   printf("h   - This help\r\n");
-  printf("x   - print stats (TWR tag mode only, Flytrex testing)");
+  printf("x   - print stats (TWR tag mode only, Flytrex testing)\n");
   printf("---- For machine only\r\n");
   printf("b   - Switch to binary mode (sniffer only)\r\n");
 }

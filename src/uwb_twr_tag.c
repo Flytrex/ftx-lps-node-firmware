@@ -86,22 +86,26 @@ static const double tsfreq = 499.2e6 * 128;  // Timestamp counter frequency
 #define ANTENNA_OFFSET 154.6   // In meter
 #define ANTENNA_DELAY  (ANTENNA_OFFSET*499.2e6*128)/299792458.0 // In radio tick
 
-typedef struct {
+typedef struct stats_s {
   unsigned int interrogations;
   unsigned int successful_interrogations;
-  double min_distance;
-  double max_distance;
-  double avg_distance;
-  double avg_rssi;
+  float min_distance;
+  float max_distance;
+  float avg_distance;
+  float distance_prev;
+  float avg_rssi;
+  float rssi_prev;
 } stats;
 
-const stats C_INIT_STATS = {
+const static stats C_INIT_STATS =  {
   .interrogations = 0,
   .successful_interrogations = 0,
-  .min_distance = DBL_MAX,
-  .max_distance = DBL_MIN,
-  .avg_distance = 0.0,
-  .avg_rssi = 0
+  .min_distance = FLT_MAX,
+  .max_distance = FLT_MIN,
+  .distance_prev = 0.0f,
+  .rssi_prev = 0.0f,
+  .avg_distance = 0.0f,
+  .avg_rssi = 0.0f
 };
 
 stats g_stats = C_INIT_STATS;
@@ -208,15 +212,16 @@ static void rxcallback(dwDevice_t *dev) {
       tprop = tprop_ctn/tsfreq;
       distance = C * tprop;
 
-      g_stats.max_distance = fmax(g_stats.max_distance, distance);
-      g_stats.min_distance = fmin(g_stats.min_distance, distance);
+      g_stats.max_distance = fmaxf(g_stats.max_distance, distance);
+      g_stats.min_distance = fminf(g_stats.min_distance, distance);
+
       if (!g_stats.successful_interrogations) {
-        g_stats.avg_distance = distance;
-        g_stats.avg_rssi = dwGetReceivePower(dev);
+        g_stats.avg_distance = g_stats.distance_prev = distance;
+        g_stats.avg_rssi = g_stats.rssi_prev = dwGetReceivePower(dev);
       }
       else {
-        g_stats.avg_distance += distance / g_stats.successful_interrogations;
-        g_stats.avg_rssi += dwGetReceivePower(dev) / g_stats.successful_interrogations;
+        g_stats.avg_distance += (distance - g_stats.distance_prev) / (g_stats.successful_interrogations + 1);
+        g_stats.avg_rssi += (dwGetReceivePower(dev) - g_stats.rssi_prev) / (g_stats.successful_interrogations + 1);
       }
 
       dwGetReceiveTimestamp(dev, &arival);
@@ -230,10 +235,16 @@ static void rxcallback(dwDevice_t *dev) {
 
 void printStats()
 {
-  printf("max = %9.3f min = %9.3f avg = %9.3f plr = %4.1f rssi = %4.1f", 
-          g_stats.max_distance, g_stats.min_distance, g_stats.avg_distance, g_stats.avg_rssi,
-          (g_stats.interrogations - g_stats.successful_interrogations) / g_stats.interrogations * 100.0f);
+  static int stat_counter = 0;
+  float max_distance = g_stats.max_distance;
+  float min_distance = g_stats.min_distance;
+  float avg_distance = g_stats.avg_distance;
+  float avg_rssi = g_stats.avg_rssi;
+  float plr = g_stats.interrogations ? ((float) g_stats.interrogations - (float) g_stats.successful_interrogations) / (float) g_stats.interrogations * 100.0f : 1.0f;
+  printf("%03d: i = %05d si = %05d max = %9.3f min = %9.3f avg = %9.3f plr = %4.1f rssi = %4.1f\r\n", 
+          stat_counter, g_stats.interrogations, g_stats.successful_interrogations, max_distance, min_distance, avg_distance, plr, avg_rssi);
   g_stats = C_INIT_STATS;
+  stat_counter++;
 }
 
 void initiateRanging(dwDevice_t *dev)
