@@ -152,7 +152,7 @@ void uwbInit()
   }
   dwEnableMode(dwm, mode);
 
-  dwSetChannel(dwm, CHANNEL_2);
+  dwSetChannel(dwm, CHANNEL_5);
 
   // Enable smart power by default
   uint8_t enableSmartPower = 1;

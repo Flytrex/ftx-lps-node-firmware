@@ -32,6 +32,8 @@
 #include <math.h>
 #include <float.h>
 
+#include "semphr.h"
+
 #include "cfg.h"
 #include "led.h"
 
@@ -96,6 +98,9 @@ typedef struct stats_s {
   float avg_rssi;
   float rssi_prev;
 } stats;
+
+SemaphoreHandle_t g_hmtx;
+StaticSemaphore_t g_mtx;
 
 const static stats C_INIT_STATS =  {
   .interrogations = 0,
@@ -212,22 +217,24 @@ static void rxcallback(dwDevice_t *dev) {
       tprop = tprop_ctn/tsfreq;
       distance = C * tprop;
 
+      xSemaphoreTake(g_hmtx, 1000);
       g_stats.max_distance = fmaxf(g_stats.max_distance, distance);
       g_stats.min_distance = fminf(g_stats.min_distance, distance);
 
-      if (!g_stats.successful_interrogations) {
-        g_stats.avg_distance = g_stats.distance_prev = distance;
-        g_stats.avg_rssi = g_stats.rssi_prev = dwGetReceivePower(dev);
+      float rssi = -200.0f;
+
+      if ((rssi = dwGetReceivePower(dev)) < -200.0f) {
+        rssi = -200.0f;
       }
-      else {
-        g_stats.avg_distance += (distance - g_stats.distance_prev) / (g_stats.successful_interrogations + 1);
-        g_stats.avg_rssi += (dwGetReceivePower(dev) - g_stats.rssi_prev) / (g_stats.successful_interrogations + 1);
-      }
+
+      g_stats.avg_distance = (g_stats.successful_interrogations * g_stats.avg_distance + distance) / (g_stats.successful_interrogations + 1);
+      g_stats.avg_rssi = (g_stats.successful_interrogations * g_stats.avg_rssi + rssi) / (g_stats.successful_interrogations + 1);
 
       dwGetReceiveTimestamp(dev, &arival);
       arival.full -= (ANTENNA_DELAY/2);
 
       g_stats.successful_interrogations++;
+      xSemaphoreGive(g_hmtx);
       break;
     }
   }
@@ -236,15 +243,20 @@ static void rxcallback(dwDevice_t *dev) {
 void printStats()
 {
   static int stat_counter = 0;
-  float max_distance = g_stats.max_distance;
-  float min_distance = g_stats.min_distance;
-  float avg_distance = g_stats.avg_distance;
-  float avg_rssi = g_stats.avg_rssi;
-  float plr = g_stats.interrogations ? ((float) g_stats.interrogations - (float) g_stats.successful_interrogations) / (float) g_stats.interrogations * 100.0f : 1.0f;
-  printf("%03d: i = %05d si = %05d max = %9.3f min = %9.3f avg = %9.3f plr = %4.1f rssi = %4.1f\r\n", 
-          stat_counter, g_stats.interrogations, g_stats.successful_interrogations, max_distance, min_distance, avg_distance, plr, avg_rssi);
-  g_stats = C_INIT_STATS;
-  stat_counter++;
+  if (xSemaphoreTake(g_hmtx, 1000) && g_stats.successful_interrogations) {
+    float max_distance = g_stats.max_distance;
+    float min_distance = g_stats.min_distance;
+    float avg_distance = g_stats.avg_distance;
+    float avg_rssi = g_stats.avg_rssi;
+    float plr = g_stats.interrogations ? ((float) g_stats.interrogations - (float) g_stats.successful_interrogations) / (float) g_stats.interrogations * 100.0f : 1.0f;
+    unsigned int interrogations = g_stats.interrogations;
+    unsigned int successful_interrogations = g_stats.successful_interrogations;
+    g_stats = C_INIT_STATS;
+    xSemaphoreGive(g_hmtx);
+    printf("%03d: i = %05u si = %05u max = %9.3f min = %9.3f avg = %9.3f plr = %4.1f rssi = %4.1f\r\n", 
+            stat_counter, interrogations, successful_interrogations, max_distance, min_distance, avg_distance, plr, avg_rssi);
+    stat_counter++;
+  }
 }
 
 void initiateRanging(dwDevice_t *dev)
@@ -305,6 +317,8 @@ static void twrTagInit(uwbConfig_t * newconfig, dwDevice_t *dev)
   // Initialize the packet in the TX buffer
   MAC80215_PACKET_INIT(txPacket, MAC802154_TYPE_DATA);
   txPacket.pan = 0xbccf;
+
+  g_hmtx = xSemaphoreCreateMutexStatic(&g_mtx);
 
   // onEvent is going to be called with eventTimeout which will start ranging
 }
